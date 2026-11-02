@@ -198,7 +198,7 @@ def build(year: int, rnd: int, ses: str, fresh: bool = False) -> Replay:
             race_start = float(lap2.min() - laps["lap_duration"].median() * 1.1)
 
     drivers, per = [], {}
-    ref_lap = None  # (tiempo, piloto, inicio, fin)
+    refs = []  # vuelta más rápida de cada piloto: (tiempo, piloto, inicio, fin)
     for dn, g in laps.groupby("driver_number"):
         dn = str(dn)
         g = g.sort_values("lap_number").reset_index(drop=True)
@@ -244,8 +244,8 @@ def build(year: int, rnd: int, ses: str, fresh: bool = False) -> Replay:
                 by_n[p.lap_number + 1]["pout"] = round(p.t, 2)
 
         fl = fastest_lap_of(lap_list)
-        if fl and (ref_lap is None or fl["t"] < ref_lap[0]):
-            ref_lap = (fl["t"], dn, fl["start"], fl["start"] + fl["t"])
+        if fl:
+            refs.append((fl["t"], dn, fl["start"], fl["start"] + fl["t"]))
 
         r = results.get(dn, {})
         d = info.get(dn, {})
@@ -264,7 +264,8 @@ def build(year: int, rnd: int, ses: str, fresh: bool = False) -> Replay:
         })
         per[dn] = lap_list
 
-    if not drivers or ref_lap is None:
+    refs.sort()
+    if not drivers or not refs:
         raise NoData("OpenF1 no tiene vueltas cronometradas para esta sesión.")
     drivers.sort(key=lambda x: x["pos"] or 99)
 
@@ -312,8 +313,13 @@ def build(year: int, rnd: int, ses: str, fresh: bool = False) -> Replay:
         return fastest_from_car(car_t, cd, a, b, fl)
 
     # Pista de referencia: vuelta más rápida de la sesión (una ventana corta de un solo piloto)
-    _, rdn, a, b = ref_lap
-    loc = frame(api("location", session_key=sk, driver_number=int(rdn), between=(when(a), when(b))), T0)
+    # A veces OpenF1 no tiene GPS de esa vuelta (Mónaco 2026); entonces se usa la siguiente más rápida.
+    for _, rdn, a, b in refs[:5]:
+        loc = frame(api("location", session_key=sk, driver_number=int(rdn), between=(when(a), when(b))), T0)
+        if not loc.empty and "x" in loc:
+            break
+    else:
+        raise NoData("OpenF1 no tiene posiciones GPS para esta sesión.")
     rt, rx, ry = pos_of(loc)
     rdist = np.concatenate([[0], np.cumsum(np.hypot(np.diff(rx), np.diff(ry)))]) / 10
     rcar = frame(api("car_data", session_key=sk, driver_number=int(rdn), between=(when(a - 1), when(b + 1))), T0)
@@ -354,7 +360,8 @@ def build(year: int, rnd: int, ses: str, fresh: bool = False) -> Replay:
     meta = {"year": year, "round": rnd, "event": ev["EventName"], "country": ev["Country"],
             "location": ev["Location"], "session": ses, "source": "OpenF1",
             "totalLaps": max(l["n"] for l in per[winner["num"]]),
-            "fastest": {"num": rdn, "t": ref_lap[0], "lap": next(l["n"] for l in per[rdn] if l["start"] == a)}}
+            "fastest": {"num": refs[0][1], "t": refs[0][0],
+                        "lap": next(l["n"] for l in per[refs[0][1]] if l["start"] == refs[0][2])}}
     return Replay(meta=meta, is_race=is_race, rot=rot, corners=corners,
                   ref={"x": rx, "y": ry, "dist": rdist, "spd": rspd},
                   drivers=drivers, laps=per, t0=t0, t1=max(all_ends) + 10, weather=wx,
