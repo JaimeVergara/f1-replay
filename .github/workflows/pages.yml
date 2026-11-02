@@ -1,0 +1,64 @@
+name: Publicar en GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1" # lunes 09:00 UTC (06:00 en Chile), después de cada fin de semana de carrera
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Lo ya descargado se reutiliza entre ejecuciones: solo se procesan las carreras nuevas.
+      - name: Recuperar caché de datos
+        uses: actions/cache/restore@v4
+        with:
+          path: cache
+          key: f1-cache-${{ github.run_id }}
+          restore-keys: f1-cache-
+
+      - name: Generar el sitio estático
+        run: python export_static.py --years 2026
+
+      # Se guarda aunque la generación falle a medias, para no repetir lo ya descargado.
+      - name: Guardar caché de datos
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: cache
+          key: f1-cache-${{ github.run_id }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>F1 Replay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@400;600;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
+  <link rel="stylesheet" href="static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark"></span>F1 <b>REPLAY</b></div>
+    <form id="picker" class="picker">
+      <select id="year" aria-label="Temporada"></select>
+      <select id="event" aria-label="Gran Premio"></select>
+      <select id="session" aria-label="Sesión"></select>
+      <button type="submit" class="btn-primary">Cargar</button>
+    </form>
+    <button id="auth-btn" class="auth-btn" type="button"><i class="dot"></i><span>F1TV</span></button>
+  </header>
+
+  <dialog id="auth-dlg" class="auth-dlg">
+    <div class="dlg-head">
+      <h2>Cuenta F1TV</h2>
+      <button type="button" class="dlg-x" id="auth-close" aria-label="Cerrar">✕</button>
+    </div>
+    <p class="muted">Con una suscripción F1TV la app usa el cronometraje oficial de FastF1: temporadas desde 2018
+      y sesiones apenas terminan. Sin cuenta se usa OpenF1 (gratis, desde 2023).</p>
+    <div id="auth-on" hidden>
+      <p class="auth-state"><i class="dot on"></i> <span id="auth-info"></span></p>
+      <button type="button" id="auth-logout" class="btn-ghost">Cerrar sesión</button>
+    </div>
+    <form id="auth-form" hidden>
+      <label>Correo de F1TV<input type="email" id="auth-email" autocomplete="username" required></label>
+      <label>Contraseña<input type="password" id="auth-pass" autocomplete="current-password" required></label>
+      <button type="submit" class="btn-primary" id="auth-submit">Iniciar sesión</button>
+      <p class="small muted">Tu correo y contraseña van solo al servidor de esta app en tu computador, que los pasa
+        directo al inicio de sesión de Fórmula 1. No se guardan: FastF1 guarda solo el token de acceso en tu perfil.</p>
+    </form>
+    <p id="auth-msg" class="auth-msg" hidden></p>
+  </dialog>
+
+  <div id="empty" class="empty">
+    <h1>Repite cualquier sesión de Fórmula 1</h1>
+    <p>Elige temporada, Gran Premio y sesión. El calendario y los circuitos vienen de <b>FastF1</b>; los datos de la sesión,
+      de <b>OpenF1</b> (gratis, desde 2023) o del cronometraje oficial si tienes F1TV.
+      La sesión se abre en segundos y el resto se va cargando por tramos mientras la ves; todo queda en caché.</p>
+  </div>
+
+  <div id="loading" class="loading" hidden>
+    <div class="spinner"></div>
+    <div id="loading-text">Cargando la sesión…</div>
+    <small>La primera vez tarda unos segundos. Las posiciones y la telemetría se van cargando por tramos mientras ves la repetición.</small>
+  </div>
+
+  <main id="app" hidden>
+    <section class="hero">
+      <div>
+        <div class="hero-sub" id="hero-sub"></div>
+        <h1 id="hero-title"></h1>
+      </div>
+      <div class="hero-weather" id="weather-now"></div>
+    </section>
+
+    <section class="stage">
+      <div class="track-card" id="track-card">
+        <div class="track-hud">
+          <div class="hud-lap"><span id="hud-lap-label">VUELTA</span> <b id="hud-lap">–</b></div>
+          <div class="hud-clock" id="hud-clock">0:00:00</div>
+          <div class="hud-status" id="hud-status">PISTA LIBRE</div>
+        </div>
+        <div class="track-opts">
+          <label><input type="checkbox" id="opt-speed"> Color por velocidad</label>
+          <label><input type="checkbox" id="opt-labels" checked> Nombres</label>
+          <label><input type="checkbox" id="opt-corners" checked> Curvas</label>
+        </div>
+        <div class="hud-buffer" id="hud-buffer" hidden><span class="spinner sm"></span><span>Cargando este tramo de la sesión…</span></div>
+        <canvas id="track"></canvas>
+        <div class="controls">
+          <button id="play" class="btn-play" aria-label="Reproducir">▶</button>
+          <select id="speed" aria-label="Velocidad">
+            <option value="1">×1</option><option value="2">×2</option><option value="4" selected>×4</option>
+            <option value="8">×8</option><option value="16">×16</option><option value="32">×32</option>
+            <option value="64">×64</option>
+          </select>
+          <input id="scrub" type="range" min="0" max="1" step="0.5" value="0" aria-label="Línea de tiempo">
+          <span id="time-label" class="mono">0:00</span>
+        </div>
+        <canvas id="status-strip" class="status-strip"></canvas>
+      </div>
+
+      <aside class="board">
+        <div class="board-head">
+          <span>Clasificación</span>
+          <div class="seg" id="gap-mode">
+            <button data-m="gap" class="on">Líder</button><button data-m="int">Intervalo</button>
+          </div>
+        </div>
+        <div id="board-rows" class="board-rows"></div>
+      </aside>
+    </section>
+
+    <section class="driver-panel" id="driver-panel"></section>
+
+    <section class="analysis">
+      <nav class="tabs" id="tabs">
+        <button data-tab="laps" class="on">Tiempos por vuelta</button>
+        <button data-tab="pos">Posiciones</button>
+        <button data-tab="strategy">Estrategia</button>
+        <button data-tab="compare">Comparar vueltas</button>
+        <button data-tab="results">Resultados</button>
+        <button data-tab="weather">Clima y Dirección</button>
+      </nav>
+      <div class="chips" id="chips"></div>
+      <div class="tab-body" id="tab-body"></div>
+    </section>
+  </main>
+
+  <div id="error" class="error" hidden></div>
+  <script src="static/config.js"></script>
+  <script src="static/app.js"></script>
+</body>
+</html>

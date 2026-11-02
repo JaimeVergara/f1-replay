@@ -1,0 +1,9 @@
+# datos descargados y generados (se rehacen solos)
+cache/
+site/
+__pycache__/
+*.pyc
+
+# configuración local del editor / Claude
+.claude/
+.vscode/
